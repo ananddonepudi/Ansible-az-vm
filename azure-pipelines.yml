@@ -1,0 +1,81 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  ansibleUser: 'azureuser'
+  targetHost: '20.219.98.40'   # Replace with your VM IP
+  privateKeyPath: '$(Agent.TempDirectory)/newkp.pem'
+
+steps:
+
+- task: DownloadSecureFile@1
+  name: downloadKey
+  inputs:
+    secureFile: 'newkp.pem'   # Upload this in Library → Secure Files
+- script: |
+    chmod 600 $(downloadKey.secureFilePath)
+    ssh-keygen -y -f $(downloadKey.secureFilePath) > newkey.pub
+  displayName: "Extract Public Key"
+
+# ☁️ Login to Azure using Service Connection
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'demoaz'
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      az vm user update --resource-group demoRG  --name demVM --username azureuser  --ssh-key-value "$(ssh-keygen -y -f $(downloadKey.secureFilePath))"
+- script: |
+    chmod 600 $(downloadKey.secureFilePath)
+    sudo apt update
+    sudo apt install -y ansible
+  displayName: 'Install Ansible'
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'demoaz'
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      # Get Public IP of VM
+      PUBLIC_IP=$(az vm show   --resource-group demoRG --name demVM --show-details  --query publicIps --output tsv)
+
+      echo "VM Public IP: $PUBLIC_IP"
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'demoaz'
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+
+      echo "[webservers]" > inventory
+
+      # Get all VM public IPs in resource group
+      VM_IPS=$(az vm list-ip-addresses \
+        --resource-group demoRG \
+        --query "[].virtualMachine.network.publicIpAddresses[].ipAddress" \
+        --output tsv)
+
+      for IP in $VM_IPS; do
+        if [ ! -z "$IP" ]; then
+          echo "$IP ansible_user=azureuser ansible_ssh_private_key_file=$(downloadKey.secureFilePath) ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> inventory
+        fi
+      done
+
+      echo "===== INVENTORY CONTENT ====="
+      cat inventory
+      echo "Generated Inventory:"
+      cat inventory
+- script: |
+    cat inventory
+  
+   
+    echo "final inventory content"
+    cat inventory
+  displayName: 'Create Inventory'
+
+- script: |
+    ansible-playbook -i inventory playbook.yaml
+  displayName: 'Run Ansible Playbook'

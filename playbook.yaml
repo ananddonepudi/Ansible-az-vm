@@ -1,0 +1,23 @@
+---
+- name: Basic setup example
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Ensure Nginx is installed
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+
+    - name: Start Nginx service
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+    - name: Install .NET Core SDK
+      apt:
+       name: dotnet-sdk-8.0
+       state: present
+       update_cache: yes
+      become: true
